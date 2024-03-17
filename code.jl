@@ -3,8 +3,14 @@ using Flux
 using SampledSignals
 using CSV
 using DataFrames
+using FFTW
+using Statistics
+using Plots
+using PlotlyJS
+using Flux.Losses
 
 muestras_input=65536#potencia de 2 mayor o igual que cuatro
+
 
 #Saca en un array los datos de .wav
 function gen_input(ruta_archivo::AbstractString)
@@ -124,6 +130,24 @@ function pruebas()
     println(size(gen_target("/home/pajon/Escritorio/Programacion/3º_2c/AA/Practica/train_labels/01.csv",round(Int,frecuencia_muestreo),8000)))
 end 
 
+function convertir_a_array(array::Vector{T}, veces::Int) where T
+    # Calcular el tamaño del nuevo array
+    n_filas = 1
+    n_columnas = ceil(Int, length(array) / veces)
+    
+    # Crear un nuevo array bidimensional con ceros
+    nuevo_array = zeros(T, n_filas, n_columnas)
+    
+    # Copiar los valores del array original al nuevo array
+    for i in 1:n_columnas
+        inicio = (i - 1) * veces + 1
+        fin = min(i * veces, length(array))
+        nuevo_array[1, i] = mean(@view(array[inicio:fin]))
+    end
+    
+    return nuevo_array
+end
+
 function procesar_archivos(input_folder::String, target_folder::String)
     # Obtener la lista de archivos en el directorio de entrada
     input_files = readdir(input_folder)
@@ -143,7 +167,7 @@ function procesar_archivos(input_folder::String, target_folder::String)
             target_csv = joinpath(target_folder, filename_base * ".csv")
 
             # Aquí puedes realizar tu tarea de procesamiento de datos
-            entrenar(input_wav,target_csv)
+            #entrenar(input_wav,target_csv)
 
         else
             println("No se encontró un archivo CSV correspondiente para $input_file")
@@ -151,21 +175,107 @@ function procesar_archivos(input_folder::String, target_folder::String)
     end
 end
 
-function entrenar(input_wav::String,target_csv::String)
-    canales, frecuencia_muestreo, tasa_bits_codificacion,tamano = obtener_info_wav(input_wav)
-    input = gen_input(input_wav)
-    input=convertir_array(input, muestras_input)
-    #println(input_wav)
-    #println(size(input))
-    #for i in 1:size(input,2)
-    #    println(size(input[:,i]))
-    #    crear_wav(input[:,i],44100,"/home/pajon/Escritorio/Programacion/3º_2c/AA/Practica/example/"*string(i)*".wav")
-    #end
-    target=gen_target(target_csv,size(input,2),muestras_input)
-    println(target)
-    println()
-    #red 
+function entrenar(input_wav1::String,input_wav2::String,f1ini::Int,f1fin::Int,f2ini::Int,f2fin::Int)
+    canales, frecuencia_muestreo, tasa_bits_codificacion,tamano = obtener_info_wav(input_wav1)
+    input = gen_input(input_wav1)
+    input1=convertir_array(input, muestras_input)
+    input = gen_input(input_wav2)
+    input2=convertir_array(input, muestras_input)
+    input=zeros(size(input1,2)+size(input2,2),4)
+    target=zeros(Int,size(input1,2)+size(input2,2),2)
+    for i in 1:size(input1,2)
+        aux=reshape(input1[:,i], 1, length(input1[:,i]))
+        #println(size(aux))
+        input[i,1],input[i,2]=mirar2notas(aux,frecuencia_muestreo,f1ini,f1fin);
+        input[i,3],input[i,4]=mirar2notas(aux,frecuencia_muestreo,f2ini,f2fin);
+        target[i,1]=1;
+    end
+    canales, frecuencia_muestreo, tasa_bits_codificacion,tamano = obtener_info_wav(input_wav2)
+    for i in 1:size(input2,2)
+        aux=reshape(input2[:,i], 1, length(input2[:,i]))
+        #println(size(aux))
+        input[i+size(input1,2),1],input[i+size(input1,2),2]=mirar2notas(aux,frecuencia_muestreo,f1ini,f1fin);
+        input[i+size(input1,2),3],input[i+size(input1,2),4]=mirar2notas(aux,frecuencia_muestreo,f2ini,f2fin);
+        target[i+size(input1,2),2]=1;
+    end
+    
+    ann = Chain(
+    Dense(4, 5, σ),
+    Dense(5, 3, σ),
+    Dense(3, 2, identity),softmax );
+    loss(model, x, y) = Losses.crossentropy(model(x), y)
+    learningRate=0.1
+    opt_state = Flux.setup(Adam(learningRate), ann)
+    Flux.train!(loss, ann, [(input', target')], opt_state)
+    println(ann(input[1,:]))
+    println(loss)
+    
 end
 
-entrenar("/home/pajon/Escritorio/Programacion/3º_2c/AA/Practica/train_data/01.wav","/home/pajon/Escritorio/Programacion/3º_2c/AA/Practica/train_labels/01.csv")    
-#procesar_archivos("/home/pajon/Escritorio/Programacion/3º_2c/AA/Practica/train_data","/home/pajon/Escritorio/Programacion/3º_2c/AA/Practica/train_labels")
+function mirar2notas(input::Matrix{Float64},frecuencia::Float32,note1::Int, note2::Int)
+
+    #canales, Fs, tasa_bits_codificacion,tamano = obtener_info_wav(input_wav)
+    #input_org = gen_input(input_wav)
+    #input=convertir_array(input_org, muestras_input)
+    #println(size(input_org,2))
+    # Numero de muestras
+    
+    n = size(input,2);
+    # Que frecuenicas queremos coger
+    f1 = note1; f2 = note2;
+    Fs=frecuencia;
+
+    #println("$(n) muestras con una frecuencia de $(Fs) muestras/seg: $(n/Fs) seg.")
+
+    # Creamos una señal de n muestras: es un array de flotantes
+    x = 1:n;
+    senalTiempo = input[1,:];
+    
+    
+    # Representamos la señal
+    #plotlyjs();
+    #graficaTiempo = plot(x, senalTiempo, label = "", xaxis = x);
+    
+    # Hallamos la FFT y tomamos el valor absoluto
+    senalFrecuencia = abs.(fft(senalTiempo));
+    
+    
+    
+    # Los valores absolutos de la primera mitad de la señal deberian de ser iguales a los de la segunda mitad, salvo errores de redondeo
+    # Esto se puede ver en la grafica:
+    #graficaFrecuencia = plot(senalFrecuencia, label = "");
+    #  pero ademas lo comprobamos en el codigo
+    if (iseven(n))
+        @assert(mean(abs.(senalFrecuencia[2:Int(n/2)] .- senalFrecuencia[end:-1:(Int(n/2)+2)]))<1e-8);
+        senalFrecuencia = senalFrecuencia[1:(Int(n/2)+1)];
+    else
+        @assert(mean(abs.(senalFrecuencia[2:Int((n+1)/2)] .- senalFrecuencia[end:-1:(Int((n-1)/2)+2)]))<1e-8);
+        senalFrecuencia = senalFrecuencia[1:(Int((n+1)/2))];
+    end;
+    
+    # Grafica con la primera mitad de la frecuencia:
+    #graficaFrecuenciaMitad = plot(senalFrecuencia, label = "");
+    
+    
+    # Representamos las 3 graficas juntas
+    #display(plot(graficaTiempo, graficaFrecuencia, graficaFrecuenciaMitad, layout = (3,1)));
+    
+    
+    # A que muestras se corresponden las frecuencias indicadas
+    #  Como limite se puede tomar la mitad de la frecuencia de muestreo
+    m1 = Int(round(f1*2*length(senalFrecuencia)/Fs));
+    m2 = Int(round(f2*2*length(senalFrecuencia)/Fs));
+    
+    # Unas caracteristicas en esa banda de frecuencias
+    #println("Media de la señal en frecuencia entre $(f1) y $(f2) Hz: ", mean(senalFrecuencia[m1:m2]));
+    #println("Desv tipica de la señal en frecuencia entre $(f1) y $(f2) Hz: ", std(senalFrecuencia[m1:m2]));
+    return mean(senalFrecuencia[m1:m2]),std(senalFrecuencia[m1:m2])
+end
+
+
+
+canales, Fs, tasa_bits_codificacion,tamano = obtener_info_wav("/home/pajon/Escritorio/Programacion/3º_2c/AA/practica/train_data/01.wav")
+#println(size(gen_input("/home/pajon/Escritorio/Programacion/3º_2c/AA/practica/train_data/01.wav")))
+#mirar2notas(gen_input("/home/pajon/Escritorio/Programacion/3º_2c/AA/practica/train_data/01.wav"),Fs,10000,20000)
+entrenar("/home/pajon/Escritorio/Programacion/3º_2c/AA/practica/train_data/01.wav","/home/pajon/Escritorio/Programacion/3º_2c/AA/practica/train_data/55.wav",10,20,80,90)    
+#procesar_archivos("/home/pajon/Escritorio/Programacion/3º_2c/AA/practica/train_data","/home/pajon/Escritorio/Programacion/3º_2c/AA/practica/train_labels")
