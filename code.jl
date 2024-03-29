@@ -148,68 +148,115 @@ function convertir_a_array(array::Vector{T}, veces::Int) where T
     return nuevo_array
 end
 
-function procesar_archivos(input_folder::String, target_folder::String)
-    # Obtener la lista de archivos en el directorio de entrada
-    input_files = readdir(input_folder)
-    target_files = readdir(target_folder)
+function procesar_archivos(input_folder::String)
+    # Obtener la lista de carpetas en el directorio de entrada
+    subfolders = readdir(input_folder)
+    
+    # Inicializar input y target
+    input = nothing
+    target = nothing
+    value = 1
+    #@assert(size(trainingInputs, 1) == size(trainingTargets, 1))
+    #@assert(size(validationInputs, 1) == size(validationTargets, 1))
+    #@assert(size(testInputs, 1) == size(testTargets, 1))
 
-    # Filtrar solo los archivos de audio WAV
-    input_files = filter(x -> endswith(x, ".wav"), input_files)
+    for subfolder in subfolders
+        
+        subfolder_path = joinpath(input_folder, subfolder)
+        
+        # Verificar si el elemento es una carpeta
+        if isdir(subfolder_path)
+            # Obtener la lista de archivos en la subcarpeta actual
+            input_files = readdir(subfolder_path)
+            input_files = filter(x -> endswith(x, ".wav"), input_files)
+            
+            for input_file in input_files
+                # Verificar si hay un archivo WAV correspondiente
+                filename_base = splitext(input_file)[1]  # Obtener el nombre base sin la extensión
+                matching_wav = joinpath(subfolder_path, filename_base * ".wav")
+                
+                if isfile(matching_wav)
+                    # Si hay un archivo WAV correspondiente, cargar ambos archivos
+                    input_wav = matching_wav
+                    target_wav = matching_wav  # No hay target en el código proporcionado
 
-    for input_file in input_files
-        # Verificar si hay un archivo CSV correspondiente
-        filename_base = splitext(input_file)[1]  # Obtener el nombre base sin la extensión
-        matching_csv = joinpath(target_folder, filename_base * ".csv")
-        #println(matching_csv)
-        if isdir(input_folder) && isdir(target_folder)
-            # Si hay un archivo CSV correspondiente, cargar ambos archivos
-            input_wav = joinpath(input_folder, input_file)
-            target_csv = joinpath(target_folder, filename_base * ".csv")
+                    # Aquí puedes realizar tu tarea de procesamiento de datos
+                    if input === nothing && target === nothing
+                        input_aux, target_aux = FFT_data(input_wav, value)
+                        input = input_aux
+                        target = target_aux
+                    else
+                        input_aux, target_aux = FFT_data(input_wav, value)
+                        input = hcat(input, input_aux)
+                        target = hcat(target, target_aux)
+                    end
 
-            # Aquí puedes realizar tu tarea de procesamiento de datos
-            #entrenar(input_wav,target_csv)
+                    #println(target)                    
 
-        else
-            println("No se encontró un archivo CSV correspondiente para $input_file")
+                else
+                    println("No se encontró un archivo WAV correspondiente para $input_file")
+                end
+            end
+
         end
+        value += 1
+    end
+    entrenar(input, target)
+end
+
+function entrenar(input,target)
+    minLoss=0.1
+    vlose=1
+    learningRate=0.1
+    ann = Chain(
+        Dense(2, 5, σ),
+        Dense(5, 3, σ),
+        Dense(3, 2, identity),softmax );
+    
+    loss(model,x, y) = Losses.crossentropy(model(x), y)    
+    opt_state = Flux.setup(Adam(learningRate), ann)    
+    while (vlose > minLoss)#añadir ciclos maximos
+
+        Flux.train!(loss, ann, [(input, target)], opt_state)  
+        vlose = loss(ann,input, target)
+        outputP = ann(input)
+        #vacc = accuracy(outputP, target)
+        println(vlose)
     end
 end
 
-function entrenar(input_wav1::String,input_wav2::String,f1ini::Int,f1fin::Int,f2ini::Int,f2fin::Int)
-    canales, frecuencia_muestreo, tasa_bits_codificacion,tamano = obtener_info_wav(input_wav1)
+function FFT_data(input_wav1::String, value::Int)
+    # El target de debe cambiar
+    canales, frecuencia_muestreo, tasa_bits_codificacion, tamano = obtener_info_wav(input_wav1)
     input = gen_input(input_wav1)
-    input1=convertir_array(input, muestras_input)
-    input = gen_input(input_wav2)
-    input2=convertir_array(input, muestras_input)
-    input=zeros(size(input1,2)+size(input2,2),4)
-    target=zeros(Int,size(input1,2)+size(input2,2),2)
-    for i in 1:size(input1,2)
-        aux=reshape(input1[:,i], 1, length(input1[:,i]))
-        #println(size(aux))
-        input[i,1],input[i,2]=mirar2notas(aux,frecuencia_muestreo,f1ini,f1fin);
-        input[i,3],input[i,4]=mirar2notas(aux,frecuencia_muestreo,f2ini,f2fin);
-        target[i,1]=1;
+    input1 = convertir_array(input, muestras_input)
+        
+    # Preinicializar las matrices con el tamaño adecuado
+    input_length = size(input1, 2)
+    inputs = Matrix{Float64}(undef, 2, input_length)
+    targets = Matrix{Float64}(undef, 2, input_length)
+
+    for i in 1:input_length
+        aux = reshape(input1[:, i], 1, length(input1[:, i]))
+        input_aux = zeros(2, 1)
+        input_aux[1, 1], input_aux[2, 1] = mirar2notas(aux, frecuencia_muestreo, 0, 0)
+        target_aux = zeros(2, 1)
+        target_aux[value, 1] = 1.0
+        inputs[:, i] .= input_aux
+        targets[:, i] .= target_aux
     end
-    canales, frecuencia_muestreo, tasa_bits_codificacion,tamano = obtener_info_wav(input_wav2)
-    for i in 1:size(input2,2)
-        aux=reshape(input2[:,i], 1, length(input2[:,i]))
-        #println(size(aux))
-        input[i+size(input1,2),1],input[i+size(input1,2),2]=mirar2notas(aux,frecuencia_muestreo,f1ini,f1fin);
-        input[i+size(input1,2),3],input[i+size(input1,2),4]=mirar2notas(aux,frecuencia_muestreo,f2ini,f2fin);
-        target[i+size(input1,2),2]=1;
+
+    return inputs, targets
+end
+
+function extract_and_remove_row!(matrix::AbstractMatrix, row_index::Integer)
+    if 1 <= row_index <= size(matrix, 1)
+        row = matrix[row_index, :]
+        matrix = vcat(matrix[1:row_index-1, :], matrix[row_index+1:end, :])
+        return row
+    else
+        throw(ArgumentError("Índice de fila fuera de rango"))
     end
-    
-    ann = Chain(
-    Dense(4, 5, σ),
-    Dense(5, 3, σ),
-    Dense(3, 2, identity),softmax );
-    loss(model, x, y) = Losses.crossentropy(model(x), y)
-    learningRate=0.1
-    opt_state = Flux.setup(Adam(learningRate), ann)
-    Flux.train!(loss, ann, [(input', target')], opt_state)
-    println(ann(input[1,:]))
-    println(loss)
-    
 end
 
 function mirar2notas(input::Matrix{Float64},frecuencia::Float32,note1::Int, note2::Int)
@@ -263,19 +310,23 @@ function mirar2notas(input::Matrix{Float64},frecuencia::Float32,note1::Int, note
     
     # A que muestras se corresponden las frecuencias indicadas
     #  Como limite se puede tomar la mitad de la frecuencia de muestreo
+
+    # recortamos la mitad no necesaria
+    f1 = 1; f2 =Int(round(length(senalFrecuencia)/2));
+
     m1 = Int(round(f1*2*length(senalFrecuencia)/Fs));
     m2 = Int(round(f2*2*length(senalFrecuencia)/Fs));
     
     # Unas caracteristicas en esa banda de frecuencias
     #println("Media de la señal en frecuencia entre $(f1) y $(f2) Hz: ", mean(senalFrecuencia[m1:m2]));
     #println("Desv tipica de la señal en frecuencia entre $(f1) y $(f2) Hz: ", std(senalFrecuencia[m1:m2]));
-    return mean(senalFrecuencia[m1:m2]),std(senalFrecuencia[m1:m2])
+    return mean(senalFrecuencia),std(senalFrecuencia)
 end
 
 
 
-canales, Fs, tasa_bits_codificacion,tamano = obtener_info_wav("/home/pajon/Escritorio/Programacion/3º_2c/AA/practica/train_data/01.wav")
-#println(size(gen_input("/home/pajon/Escritorio/Programacion/3º_2c/AA/practica/train_data/01.wav")))
-#mirar2notas(gen_input("/home/pajon/Escritorio/Programacion/3º_2c/AA/practica/train_data/01.wav"),Fs,10000,20000)
-entrenar("/home/pajon/Escritorio/Programacion/3º_2c/AA/practica/train_data/01.wav","/home/pajon/Escritorio/Programacion/3º_2c/AA/practica/train_data/55.wav",10,20,80,90)    
-#procesar_archivos("/home/pajon/Escritorio/Programacion/3º_2c/AA/practica/train_data","/home/pajon/Escritorio/Programacion/3º_2c/AA/practica/train_labels")
+#canales, Fs, tasa_bits_codificacion,tamano = obtener_info_wav("train_data/01.wav")
+#println(size(gen_input("train_data/01.wav")))
+#mirar2notas(gen_input("train_data/01.wav"),Fs,10000,20000)
+#entrenar("train_data/01.wav","train_data/55.wav",10,20,80,90)    
+procesar_archivos("carpeta_input");
