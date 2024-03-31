@@ -6,10 +6,16 @@ using DataFrames
 using FFTW
 using Statistics
 using Plots
-using PlotlyJS
 using Flux.Losses
+using ScikitLearn
+@sk_import svm:SVC
+@sk_import tree:DecisionTreeClassifier
+@sk_import neighbors:KNeighborsClassifier
+
 
 muestras_input=65536#potencia de 2 mayor o igual que cuatro
+output_length=2
+input_length=2
 
 
 #Saca en un array los datos de .wav
@@ -201,28 +207,247 @@ function procesar_archivos(input_folder::String)
         end
         value += 1
     end
-    entrenar(input, target)
+    lose=entrenar_RRNNAA(input, target)
+    println("Error RRNNAA: ",lose)
+    mse,mae=entrenar_svm(input, target)
+    println("SVM MSE:",mse)
+    println("SVM MAE:",mae)
+    mse,mae=entrenar_tree(input, target)
+    println("SVM TREE:",mse)
+    println("SVM TREE:",mae)
+    mse,mae=entrenar_KNe(input, target)
+    println("SVM KNe:",mse)
+    println("SVM KNe:",mae)
 end
 
-function entrenar(input,target)
+function entrenar_RRNNAA(input_train,target_train)
+    gr();
     minLoss=0.1
-    vlose=1
-    learningRate=0.1
+    learningRate=0.02
+    input_validation=nothing
+    target_validation=nothing
+    input_test=nothing
+    target_test=nothing
+    max_ciclos=120
+    iteracion=1
+    restar=0
+    sin_mejora=0
+    parar_nomejora=20
+    historico_train=Float64[]
+    historico_validation=Float64[]
+    historico_test=Float64[]
+    #println(size(input_train,2))
+    #extrae del conjunto de entrenamiento el conjunto de test y validacion
+    for i in 1:size(input_train,2)
+        if i%10==2||i%10==6
+            if input_validation==nothing
+                input_validation=zeros(input_length,1)
+                input_train,input_validation[:,1]=extract_and_remove(input_train,i-restar)
+            else
+                aux=zeros(input_length,1)
+                input_train,aux[:,1]=extract_and_remove(input_train,i-restar)
+                input_validation=hcat(input_validation,aux)
+            end
+            if target_validation==nothing
+                target_validation=zeros(output_length,1)
+                target_train,target_validation[:,1]=extract_and_remove(target_train,i-restar)
+            else
+                aux=zeros(output_length,1)
+                target_train,aux[:,1]=extract_and_remove(target_train,i-restar)
+                target_validation=hcat(target_validation,aux)
+            end
+            restar+=1
+        end
+        if i%10==3
+            if input_test==nothing
+                input_test=zeros(input_length,1)
+                input_train,input_test[:,1]=extract_and_remove(input_train,i-restar)
+            else
+                aux=zeros(input_length,1)
+                input_train,aux[:,1]=extract_and_remove(input_train,i-restar)
+                input_test=hcat(input_test,aux)
+            end
+            if target_test==nothing
+                target_test=zeros(output_length,1)
+                target_train,target_test[:,1]=extract_and_remove(target_train,i-restar)
+            else
+                aux=zeros(output_length,1)
+                target_train,aux[:,1]=extract_and_remove(target_train,i-restar)
+                target_test=hcat(target_test,aux)
+            end
+            restar+=1
+        end
+    end
     ann = Chain(
-        Dense(2, 5, σ),
-        Dense(5, 3, σ),
-        Dense(3, 2, identity),softmax );
+        Dense(input_length, 5, σ),
+        Dense(5, 4, σ),
+        Dense(4, 3, σ),
+        Dense(3, output_length, identity),softmax );
     
     loss(model,x, y) = Losses.crossentropy(model(x), y)    
     opt_state = Flux.setup(Adam(learningRate), ann)    
-    while (vlose > minLoss)#añadir ciclos maximos
+    outputP = ann(input_train)
+    vlose = loss(ann,input_validation, target_validation)
+    mejor=vlose
+    #while (vlose > minLoss&&max_ciclos>iteracion&&sin_mejora!=parar_nomejora)
+    while (vlose > minLoss&&max_ciclos>iteracion)
 
-        Flux.train!(loss, ann, [(input, target)], opt_state)  
-        vlose = loss(ann,input, target)
-        outputP = ann(input)
-        #vacc = accuracy(outputP, target)
-        println(vlose)
+        Flux.train!(loss, ann, [(input_train, target_train)], opt_state)  
+        vlose = loss(ann,input_validation, target_validation)
+        outputP = ann(input_validation)
+        #vacc = accuracy(outputP, target_validation)
+        #if(vlose>mejor)
+        #    sin_mejora+=1
+        #else
+        #    mejor=vlose
+        #    sin_mejora=0
+        #end
+        push!(historico_train,loss(ann,input_train, target_train))
+        push!(historico_test,loss(ann,input_test, target_test))
+        push!(historico_validation,vlose)
+        #println(vlose)
+        iteracion+=1
     end
+    
+    vlose = loss(ann,input_test, target_test)
+    outputP = ann(input_test)
+    #vacc = accuracy(outputP, target_test)
+    push!(historico_train,loss(ann,input_train, target_train))
+    push!(historico_test,loss(ann,input_test, target_test))
+    push!(historico_validation,vlose)
+    p1=plot(historico_train, title="Historico Train", subplot=1)
+    p2=plot(historico_test, title="Historico Test", subplot=1)
+    p3=plot(historico_validation, title="Historico Validation", subplot=1)
+    display(plot(p1,p2,p3, layout = (3,1)));
+
+    return vlose
+end
+
+function entrenar_svm(input_train, target_train)
+    input_test=nothing
+    target_test=nothing
+    restar=0
+    for i in 1:size(input_train,2)
+        if i%10==2
+            if input_test==nothing
+                input_test=zeros(input_length,1)
+                input_train,input_test[:,1]=extract_and_remove(input_train,i-restar)
+            else
+                aux=zeros(input_length,1)
+                input_train,aux[:,1]=extract_and_remove(input_train,i-restar)
+                input_test=hcat(input_test,aux)
+            end
+            if target_test==nothing
+                target_test=zeros(output_length,1)
+                target_train,target_test[:,1]=extract_and_remove(target_train,i-restar)
+            else
+                aux=zeros(output_length,1)
+                target_train,aux[:,1]=extract_and_remove(target_train,i-restar)
+                target_test=hcat(target_test,aux)
+            end
+        end
+        restar+=1
+    end
+    model = SVC(kernel="rbf", degree=3, gamma=2, C=1);
+    fit!(model, input_train', crear_vector(target_train)');
+    testOutputs = predict(model, input_test');
+    #aux=crear_vector(target_test)'
+    #println(aux)
+    #printConfusionMatrix(testOutputs,collect(aux))
+    # Calcular el error cuadrático medio (MSE)
+    mse = mean((testOutputs .- target_test').^2)
+    # Calcular el error absoluto medio (MAE)
+    mae = mean(abs.(testOutputs .- target_test'))
+    return mse,mae
+end
+
+function comparar_resultados()
+    
+end
+
+function entrenar_tree(input_train, target_train)
+    input_test=nothing
+    target_test=nothing
+    restar=0
+    for i in 1:size(input_train,2)
+        if i%10==2
+            if input_test==nothing
+                input_test=zeros(input_length,1)
+                input_train,input_test[:,1]=extract_and_remove(input_train,i-restar)
+            else
+                aux=zeros(input_length,1)
+                input_train,aux[:,1]=extract_and_remove(input_train,i-restar)
+                input_test=hcat(input_test,aux)
+            end
+            if target_test==nothing
+                target_test=zeros(output_length,1)
+                target_train,target_test[:,1]=extract_and_remove(target_train,i-restar)
+            else
+                aux=zeros(output_length,1)
+                target_train,aux[:,1]=extract_and_remove(target_train,i-restar)
+                target_test=hcat(target_test,aux)
+            end
+        end
+        restar+=1
+    end
+    model = DecisionTreeClassifier(max_depth=4, random_state=1)
+    fit!(model, input_train', crear_vector(target_train)');
+    testOutputs = predict(model, input_test');
+    # Calcular el error cuadrático medio (MSE)
+    mse = mean((testOutputs .- target_test').^2)
+    # Calcular el error absoluto medio (MAE)
+    mae = mean(abs.(testOutputs .- target_test'))
+    return mse,mae
+end
+
+function entrenar_KNe(input_train, target_train)
+    input_test=nothing
+    target_test=nothing
+    restar=0
+    for i in 1:size(input_train,2)
+        if i%10==2
+            if input_test==nothing
+                input_test=zeros(input_length,1)
+                input_train,input_test[:,1]=extract_and_remove(input_train,i-restar)
+            else
+                aux=zeros(input_length,1)
+                input_train,aux[:,1]=extract_and_remove(input_train,i-restar)
+                input_test=hcat(input_test,aux)
+            end
+            if target_test==nothing
+                target_test=zeros(output_length,1)
+                target_train,target_test[:,1]=extract_and_remove(target_train,i-restar)
+            else
+                aux=zeros(output_length,1)
+                target_train,aux[:,1]=extract_and_remove(target_train,i-restar)
+                target_test=hcat(target_test,aux)
+            end
+        end
+        restar+=1
+    end
+    model = KNeighborsClassifier(3);
+    fit!(model, input_train', crear_vector(target_train)');
+    testOutputs = predict(model, input_test');
+    # Calcular el error cuadrático medio (MSE)
+    mse = mean((testOutputs .- target_test').^2)
+    # Calcular el error absoluto medio (MAE)
+    mae = mean(abs.(testOutputs .- target_test'))
+    return mse,mae
+end
+
+function crear_vector(matriz::Matrix{Float64})
+    m, n = size(matriz)
+    vector_resultado = zeros(Int, n)
+    
+    for i in 1:m
+        for j in 1:n
+            if matriz[i, j] == 1
+                vector_resultado[j] = i
+            end
+        end
+    end
+    
+    return vector_resultado
 end
 
 function FFT_data(input_wav1::String, value::Int)
@@ -232,15 +457,15 @@ function FFT_data(input_wav1::String, value::Int)
     input1 = convertir_array(input, muestras_input)
         
     # Preinicializar las matrices con el tamaño adecuado
-    input_length = size(input1, 2)
-    inputs = Matrix{Float64}(undef, 2, input_length)
-    targets = Matrix{Float64}(undef, 2, input_length)
+    input_size = size(input1, input_length)
+    inputs = Matrix{Float64}(undef, input_length, input_size)
+    targets = Matrix{Float64}(undef, output_length, input_size)
 
-    for i in 1:input_length
+    for i in 1:input_size
         aux = reshape(input1[:, i], 1, length(input1[:, i]))
-        input_aux = zeros(2, 1)
-        input_aux[1, 1], input_aux[2, 1] = mirar2notas(aux, frecuencia_muestreo, 0, 0)
-        target_aux = zeros(2, 1)
+        input_aux = zeros(input_length, 1)
+        input_aux[1, 1], input_aux[input_length, 1] = mirar2notas(aux, frecuencia_muestreo, 0, 0)
+        target_aux = zeros(output_length, 1)
         target_aux[value, 1] = 1.0
         inputs[:, i] .= input_aux
         targets[:, i] .= target_aux
@@ -249,13 +474,14 @@ function FFT_data(input_wav1::String, value::Int)
     return inputs, targets
 end
 
-function extract_and_remove_row!(matrix::AbstractMatrix, row_index::Integer)
-    if 1 <= row_index <= size(matrix, 1)
-        row = matrix[row_index, :]
-        matrix = vcat(matrix[1:row_index-1, :], matrix[row_index+1:end, :])
-        return row
+function extract_and_remove(matrix::AbstractMatrix, col_index::Integer)
+    if 1 <= col_index <= size(matrix, 2)
+        col = matrix[:, col_index]
+        matrix = hcat(matrix[:, 1:col_index-1], matrix[:, col_index+1:end])
+        #println(size(matrix))
+        return matrix, col
     else
-        throw(ArgumentError("Índice de fila fuera de rango"))
+        throw(ArgumentError("Índice de columna fuera de rango"))
     end
 end
 
@@ -320,9 +546,8 @@ function mirar2notas(input::Matrix{Float64},frecuencia::Float32,note1::Int, note
     # Unas caracteristicas en esa banda de frecuencias
     #println("Media de la señal en frecuencia entre $(f1) y $(f2) Hz: ", mean(senalFrecuencia[m1:m2]));
     #println("Desv tipica de la señal en frecuencia entre $(f1) y $(f2) Hz: ", std(senalFrecuencia[m1:m2]));
-    return mean(senalFrecuencia),std(senalFrecuencia)
+    return mean(senalFrecuencia[m1:m2]),std(senalFrecuencia[m1:m2])
 end
-
 
 
 #canales, Fs, tasa_bits_codificacion,tamano = obtener_info_wav("train_data/01.wav")
