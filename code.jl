@@ -247,7 +247,8 @@ function entrenar_RRNNAA(input_train,target_train)
     #println(size(input_train,2))
     #extrae del conjunto de entrenamiento el conjunto de test y validacion
     for i in 1:size(input_train,2)
-        if i%10==2||i%10==6
+        x=rand(1:10)
+        if x%10==2||x%10==6
             if input_validation==nothing
                 input_validation=zeros(input_length,1)
                 input_train,input_validation[:,1]=extract_and_remove(input_train,i-restar)
@@ -266,7 +267,7 @@ function entrenar_RRNNAA(input_train,target_train)
             end
             restar+=1
         end
-        if i%10==3
+        if x%10==3
             if input_test==nothing
                 input_test=zeros(input_length,1)
                 input_train,input_test[:,1]=extract_and_remove(input_train,i-restar)
@@ -287,8 +288,8 @@ function entrenar_RRNNAA(input_train,target_train)
         end
     end
     ann = Chain(
-        Dense(input_length, 5, σ),
-        Dense(5, 4, σ),
+        Dense(input_length, 4, σ),
+        #Dense(5, 4, σ),
         Dense(4, 3, σ),
         Dense(3, output_length, identity),softmax );
     
@@ -328,14 +329,43 @@ function entrenar_RRNNAA(input_train,target_train)
     p3=plot(historico_validation, title="Historico Validation", subplot=1)
     display(plot(p1,p2,p3, layout = (3,1)));   
     # Convertir los valores en bool dependiendo si son mayores o menores que 0.5
+    outputP = nearest_to_one_matrix(outputP)
     outputP = Array{Bool}(outputP .> 0.5)
-    outputP = [elemento for fila in outputP for elemento in fila]
     # Convertir los valores en bool dependiendo si son mayores o menores que 0.5
+    target_test = nearest_to_one_matrix(target_test)
     target_test = Array{Bool}(target_test .> 0.5)
-    target_test = [elemento for fila in target_test for elemento in fila]
-    printConfusionMatrix(outputP,target_test)
+    printConfusionMatrix(outputP'[:,1],target_test'[:,1])
+    
 
     return vlose
+end
+
+function nearest_to_one_matrix(matrix::Matrix)
+    result = similar(matrix, Bool)
+
+    for j in 1:size(matrix, 2)
+        min_distance = Inf
+        nearest_index = -1
+
+        # Encontrar el índice del valor más cercano a 1 en la columna j
+        for i in 1:size(matrix, 1)
+            distance = abs(1 - matrix[i, j])
+            if distance < min_distance
+                min_distance = distance
+                nearest_index = i
+            end
+        end
+
+        # Configurar a 1 el valor más cercano a 1 y el resto a 0 en la columna j
+        result[nearest_index, j] = 1
+        for i in 1:size(matrix, 1)
+            if i != nearest_index
+                result[i, j] = 0
+            end
+        end
+    end
+
+    return result
 end
 
 function entrenar_svm(input_train, target_train)
@@ -343,7 +373,8 @@ function entrenar_svm(input_train, target_train)
     target_test=nothing
     restar=0
     for i in 1:size(input_train,2)
-        if i%10==2
+        x=rand(1:10)
+        if x%10==2
             if input_test==nothing
                 input_test=zeros(input_length,1)
                 input_train,input_test[:,1]=extract_and_remove(input_train,i-restar)
@@ -360,17 +391,19 @@ function entrenar_svm(input_train, target_train)
                 target_train,aux[:,1]=extract_and_remove(target_train,i-restar)
                 target_test=hcat(target_test,aux)
             end
+            restar+=1
         end
-        restar+=1
+        
     end
-    model = SVC(kernel="rbf", degree=3, gamma=2, C=1);
+    model = SVC(kernel="rbf", degree=3, gamma=1, C=3);
     fit!(model, input_train', crear_vector(target_train)');
     testOutputs = predict(model, input_test');
     #aux=crear_vector(target_test)'
     #println(aux)
     #printConfusionMatrix(testOutputs,collect(aux))
-    aux=crear_vector(target_test)'
-    printConfusionMatrix(recrear_vector(testOutputs,output_length),recrear_vector(aux,output_length))
+    
+    aux=(Array{Bool}(target_test .== 1))'
+    printConfusionMatrix(recrear_vector(testOutputs,output_length)[:,1],aux[:,1])
     # Calcular el error cuadrático medio (MSE)
     mse = mean((testOutputs .- target_test').^2)
     # Calcular el error absoluto medio (MAE)
@@ -383,7 +416,8 @@ function entrenar_tree(input_train, target_train)
     target_test=nothing
     restar=0
     for i in 1:size(input_train,2)
-        if i%10==2
+        x=rand(1:10)
+        if x%10==2
             if input_test==nothing
                 input_test=zeros(input_length,1)
                 input_train,input_test[:,1]=extract_and_remove(input_train,i-restar)
@@ -400,14 +434,14 @@ function entrenar_tree(input_train, target_train)
                 target_train,aux[:,1]=extract_and_remove(target_train,i-restar)
                 target_test=hcat(target_test,aux)
             end
+            restar+=1
         end
-        restar+=1
     end
-    model = DecisionTreeClassifier(max_depth=4, random_state=1)
+    model = DecisionTreeClassifier(max_depth=2, random_state=1)
     fit!(model, input_train', crear_vector(target_train)');
     testOutputs = predict(model, input_test');
-    aux=crear_vector(target_test)'
-    printConfusionMatrix(recrear_vector(testOutputs,output_length),recrear_vector(aux,output_length))
+    aux=(Array{Bool}(target_test .> 0.5))'
+    printConfusionMatrix(recrear_vector(testOutputs,output_length)[:,1],aux[:,1])
     # Calcular el error cuadrático medio (MSE)
     mse = mean((testOutputs .- target_test').^2)
     # Calcular el error absoluto medio (MAE)
@@ -420,7 +454,8 @@ function entrenar_KNe(input_train, target_train)
     target_test=nothing
     restar=0
     for i in 1:size(input_train,2)
-        if i%10==2
+        x=rand(1:10)
+        if x%10==2
             if input_test==nothing
                 input_test=zeros(input_length,1)
                 input_train,input_test[:,1]=extract_and_remove(input_train,i-restar)
@@ -437,14 +472,15 @@ function entrenar_KNe(input_train, target_train)
                 target_train,aux[:,1]=extract_and_remove(target_train,i-restar)
                 target_test=hcat(target_test,aux)
             end
+            restar+=1
         end
-        restar+=1
+        
     end
-    model = KNeighborsClassifier(3);
+    model = KNeighborsClassifier(2);
     fit!(model, input_train', crear_vector(target_train)');
     testOutputs = predict(model, input_test');
-    aux=crear_vector(target_test)'
-    printConfusionMatrix(recrear_vector(testOutputs,output_length),recrear_vector(aux,output_length))
+    aux=(Array{Bool}(target_test .> 0.5))'
+    printConfusionMatrix(recrear_vector(testOutputs,output_length)[:,1],aux[:,1])
     # Calcular el error cuadrático medio (MSE)
     mse = mean((testOutputs .- target_test').^2)
     # Calcular el error absoluto medio (MAE)
@@ -469,12 +505,13 @@ end
 
 function recrear_vector(array,size::Int)
     #println(array)
-    result=zeros(length(array)*size)
+    result=zeros(length(array),size)
     for i in 1:length(array)
-        result[(i-1)*size+(array[i])]=1
+        result[i,array[i]]=1
     end
     #println(result)
     return Array{Bool}(result .> 0.5)
+    #return Array{Bool}(array .> 0.5)
 end
 
 function FFT_data(input_wav1::String, value::Int)
@@ -578,71 +615,57 @@ end
 
 #CODIGO COPY 
 
-accuracy(targets::AbstractArray{Bool,1}, outputs::AbstractArray{Bool,1}) = mean(outputs .== targets);
+
+
+accuracy(outputs::AbstractArray{Bool,1}, targets::AbstractArray{Bool,1}) = mean(outputs.==targets);
+function accuracy(outputs::AbstractArray{Bool,2}, targets::AbstractArray{Bool,2})
+    @assert(all(size(outputs).==size(targets)));
+    if (size(targets,2)==1)
+        return accuracy(outputs[:,1], targets[:,1]);
+    else
+        return mean(all(targets .== outputs, dims=2));
+    end;
+end;
 
 function confusionMatrix(outputs::AbstractArray{Bool,1}, targets::AbstractArray{Bool,1})
-    @assert(length(outputs) == length(targets))
-    # Para calcular la precision y la tasa de error, se puede llamar a las 
-    #funciones definidas en la practica 2
-    acc = accuracy(outputs, targets) # Precision, definida previamente 
-    #en una practica anterior
-    errorRate = 1.0 - acc
-    recall = mean(outputs[targets]) # Sensibilidad
-    specificity = mean(.!outputs[.!targets]) # Especificidad
-    precision = mean(targets[outputs]) # Valor predictivo positivo
-    NPV = mean(.!targets[.!outputs]) # Valor predictivo negativo
-    # Controlamos que algunos casos pueden ser NaN
-    # Para el caso de sensibilidad y especificidad, en un conjunto de 
-    #entrenamiento estos no pueden ser NaN, porque esto indicaria que se ha intentado
-    #entrenar con una unica clase
-    # Sin embargo, sí pueden ser NaN en el caso de aplicar un modelo en un 
-    #conjunto de test, si este sólo tiene patrones de una clase
-    # Para VPP y VPN, sí pueden ser NaN en caso de que el clasificador lo haya 
-    #clasificado todo como negativo o positivo respectivamente
-    # En estos casos, estas metricas habria que dejarlas a NaN para indicar que 
-    #no se han podido evaluar
-    # Sin embargo, como es posible que se quiera combinar estos valores al 
-    #evaluar una clasificacion multiclase, es necesario asignarles un valor. El 
-    #criterio que se usa aqui es que estos valores seran igual a 0
-    # Ademas, hay un caso especial: cuando los VP son el 100% de los patrones, o
-    #los VN son el 100% de los patrones
-
-    # En este caso, el sistema ha actuado correctamente, así que controlamos 
-    #primero este caso
-    if isnan(recall) && isnan(precision) # Los VN son el 100% de los patrones
-        recall = 1.0
-        precision = 1.0
-    elseif isnan(specificity) && isnan(NPV) # Los VP son el 100% de los patrones
-        specificity = 1.0
-        NPV = 1.0
-    end
-    # Ahora controlamos los casos en los que no se han podido evaluar las 
-    #metricas excluyendo los casos anteriores
-    recall = isnan(recall) ? 0.0 : recall
-    specificity = isnan(specificity) ? 0.0 : specificity
-    precision = isnan(precision) ? 0.0 : precision
-    NPV = isnan(NPV) ? 0.0 : NPV
-    # Calculamos F1, teniendo en cuenta que si sensibilidad o VPP es NaN (pero 
-    #no ambos), el resultado tiene que ser 0 porque si sensibilidad=NaN entonces 
-    #VPP=0 y viceversa
-    F1 = (recall == precision == 0.0) ? 0.0 :
-         2 * (recall * precision) / (recall + precision)
-    # Reservamos memoria para la matriz de confusion
-    confMatrix = Array{Int64,2}(undef, 2, 2)
-    # Ponemos en las filas los que pertenecen a cada clase (targets) y en las 
-    #columnas los clasificados (outputs)
-    # Primera fila/columna: negativos
-    # Segunda fila/columna: positivos
-    # Primera fila: patrones de clase negativo, clasificados como negativos o 
-    #positivos
-    confMatrix[1, 1] = sum(.!targets .& .!outputs) # VN
-    confMatrix[1, 2] = sum(.!targets .& outputs) # FP
-    # Segunda fila: patrones de clase positiva, clasificados como negativos o 
-    #positivos
-    confMatrix[2, 1] = sum(targets .& .!outputs) # FN
-    confMatrix[2, 2] = sum(targets .& outputs) # VP
+    numInstances = length(targets);
+    @assert(length(outputs)==numInstances);
+    # Valores de la matriz de confusion
+    TN = sum(.!outputs .& .!targets); # Verdaderos negativos
+    FN = sum(.!outputs .&   targets); # Falsos negativos
+    TP = sum(  outputs .&   targets); # Verdaderos positivos
+    FP = sum(  outputs .& .!targets); # Falsos negativos
+    # Creamos la matriz de confusión, poniendo en las filas los que pertenecen a cada clase (targets) y en las columnas los clasificados (outputs)
+    #  Primera fila/columna: negativos
+    #  Segunda fila/columna: positivos
+    confMatrix = [TN FP; FN TP];
+    # Metricas que se derivan de la matriz de confusion:
+    acc         = (TN+TP)/(TN+FN+TP+FP);
+    errorRate   = 1. - acc;
+    # Para sensibilidad, especificidad, VPP y VPN controlamos que algunos casos pueden ser NaN
+    #  Para el caso de sensibilidad y especificidad, en un conjunto de entrenamiento estos no pueden ser NaN, porque esto indicaria que se ha intentado entrenar con una unica clase
+    #   Sin embargo, sí pueden ser NaN en el caso de aplicar un modelo en un conjunto de test, si este sólo tiene patrones de una clase
+    #  Para VPP y VPN, sí pueden ser NaN en caso de que el clasificador lo haya clasificado todo como negativo o positivo respectivamente
+    # En estos casos, estas metricas habria que dejarlas a NaN para indicar que no se han podido evaluar
+    #  Sin embargo, como es posible que se quiera combinar estos valores al evaluar una clasificacion multiclase, es necesario asignarles un valor. El criterio que se usa aqui es que estos valores seran igual a 0
+    # Ademas, hay un caso especial: cuando los VP son el 100% de los patrones, o los VN son el 100% de los patrones
+    #  En este caso, el sistema ha actuado correctamente, así que controlamos primero este caso
+    if (TN==numInstances) || (TP==numInstances)
+        recall = 1.;
+        precision = 1.;
+        specificity = 1.;
+        NPV = 1.;
+    else
+        recall      = (TP==TP==0.) ? 0. : TP/(TP+FN); # Sensibilidad
+        specificity = (TN==FP==0.) ? 0. : TN/(TN+FP); # Especificidad
+        precision   = (TP==FP==0.) ? 0. : TP/(TP+FP); # Valor predictivo positivo
+        NPV         = (TN==FN==0.) ? 0. : TN/(TN+FN); # Valor predictivo negativo
+    end;
+    # Calculamos F1, teniendo en cuenta que si sensibilidad o VPP es NaN (pero no ambos), el resultado tiene que ser 0 porque si sensibilidad=NaN entonces VPP=0 y viceversa
+    F1          = (recall==precision==0.) ? 0. : 2*(recall*precision)/(recall+precision);
     return (acc, errorRate, recall, specificity, precision, NPV, F1, confMatrix)
 end;
+
 
 function printConfusionMatrix(outputs::AbstractArray{Bool,1}, targets::AbstractArray{Bool,1})
     (acc, errorRate, recall, specificity, precision, NPV, F1, confMatrix) = confusionMatrix(outputs, targets)
