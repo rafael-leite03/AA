@@ -207,6 +207,8 @@ function procesar_archivos(input_folder::String)
         end
         value += 1
     end
+    println()
+    println("-RRNNAA:")
     lose=entrenar_RRNNAA(input, target)
     println("Error RRNNAA: ",lose)
     println()
@@ -215,7 +217,7 @@ function procesar_archivos(input_folder::String)
     println("SVM MSE:",mse)
     println("SVM MAE:",mae)
     println()
-    println("-TREE")
+    println("-TREE:")
     mse,mae=entrenar_tree(input, target)
     println("TREE MSE:",mse)
     println("TREE MAE:",mae)
@@ -466,10 +468,12 @@ function crear_vector(matriz::Matrix{Float64})
 end
 
 function recrear_vector(array,size::Int)
+    #println(array)
     result=zeros(length(array)*size)
-    for i in length(array)
-        result[(i-1)*size+(array[i]-1)]=1
+    for i in 1:length(array)
+        result[(i-1)*size+(array[i])]=1
     end
+    #println(result)
     return Array{Bool}(result .> 0.5)
 end
 
