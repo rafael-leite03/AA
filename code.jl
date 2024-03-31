@@ -319,14 +319,12 @@ function entrenar_RRNNAA(input_train,target_train)
     p2=plot(historico_test, title="Historico Test", subplot=1)
     p3=plot(historico_validation, title="Historico Validation", subplot=1)
     display(plot(p1,p2,p3, layout = (3,1)));   
-    println(typeof(target_test))
     # Convertir los valores en bool dependiendo si son mayores o menores que 0.5
     outputP = Array{Bool}(outputP .> 0.5)
     outputP = [elemento for fila in outputP for elemento in fila]
     # Convertir los valores en bool dependiendo si son mayores o menores que 0.5
     target_test = Array{Bool}(target_test .> 0.5)
     target_test = [elemento for fila in target_test for elemento in fila]
-    println(typeof(outputP))
     printConfusionMatrix(outputP,target_test)
 
     return vlose
