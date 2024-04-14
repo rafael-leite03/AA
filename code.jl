@@ -6,17 +6,19 @@ using DataFrames
 using FFTW
 using Statistics
 using Plots
+using Random
 using Flux.Losses
 using ScikitLearn
+using DelimitedFiles
 @sk_import svm:SVC
 @sk_import tree:DecisionTreeClassifier
 @sk_import neighbors:KNeighborsClassifier
 
 
 muestras_input=65536#potencia de 2 mayor o igual que cuatro
-output_length=2
-input_length=2
-
+output_length=82
+input_length=164
+kfold=300
 
 #Saca en un array los datos de .wav
 function gen_input(ruta_archivo::AbstractString)
@@ -58,10 +60,12 @@ function convertir_array(array::Matrix{T}, veces::Int) where T
     
     # Crear un nuevo array bidimensional con ceros
     nuevo_array = zeros(T, n_filas, n_columnas)
-    
+    tamano=size(array,2)
     # Copiar los valores del array original al nuevo array, desplazándolos
     for i in 1:veces
-        nuevo_array[i,1]=array[1,i]
+        if(i<=tamano)
+            nuevo_array[i,1]=array[1,i]
+        end
     end
     for i in 1:n_filas
             for j in 2:n_columnas-1
@@ -69,6 +73,9 @@ function convertir_array(array::Matrix{T}, veces::Int) where T
                 j_aux=round(Int,j_aux)
                 nuevo_array[i,j] = array[1,i+j_aux]
             end
+    end
+    if(veces>tamano)
+        veces=tamano
     end
     for i in 1:veces
         nuevo_array[i,n_columnas]=array[1,(length(array))-veces+i]
@@ -165,9 +172,13 @@ function procesar_archivos(input_folder::String)
     #@assert(size(trainingInputs, 1) == size(trainingTargets, 1))
     #@assert(size(validationInputs, 1) == size(validationTargets, 1))
     #@assert(size(testInputs, 1) == size(testTargets, 1))
+    folder_names = Float16[]
+    for subfolder in subfolders
+        push!(folder_names, parse(Float16, subfolder))
+    end
 
     for subfolder in subfolders
-        
+        println(subfolder)
         subfolder_path = joinpath(input_folder, subfolder)
         
         # Verificar si el elemento es una carpeta
@@ -188,11 +199,11 @@ function procesar_archivos(input_folder::String)
 
                     # Aquí puedes realizar tu tarea de procesamiento de datos
                     if input === nothing && target === nothing
-                        input_aux, target_aux = FFT_data(input_wav, value)
+                        input_aux, target_aux = FFT_data(input_wav, value,folder_names)
                         input = input_aux
                         target = target_aux
                     else
-                        input_aux, target_aux = FFT_data(input_wav, value)
+                        input_aux, target_aux = FFT_data(input_wav, value,folder_names)
                         input = hcat(input, input_aux)
                         target = hcat(target, target_aux)
                     end
@@ -207,43 +218,28 @@ function procesar_archivos(input_folder::String)
         end
         value += 1
     end
-    println()
-    println("-RRNNAA:")
-    lose=entrenar_RRNNAA(input, target)
-    println("Error RRNNAA: ",lose)
-    println()
-    println("-SMV:")
-    mse,mae=entrenar_svm(input, target)
-    println("SVM MSE:",mse)
-    println("SVM MAE:",mae)
-    println()
-    println("-TREE:")
-    mse,mae=entrenar_tree(input, target)
-    println("TREE MSE:",mse)
-    println("TREE MAE:",mae)
-    println()
-    println("-KNe:")
-    mse,mae=entrenar_KNe(input, target)
-    println("KNe MSE:",mse)
-    println("KNe MAE:",mae)
+    println(size(input))
+    open("input.txt", "w") do archivo
+        writedlm(archivo, input)
+    end
+    open("target.txt", "w") do archivo
+        writedlm(archivo, target)
+    end
 end
 
-function entrenar_RRNNAA(input_train,target_train)
+function entrenar_RRNNAA(input_train,target_train,input_test,target_test)
     gr();
     minLoss=0.1
     learningRate=0.02
     input_validation=nothing
     target_validation=nothing
-    input_test=nothing
-    target_test=nothing
     max_ciclos=120
     iteracion=1
     restar=0
-    sin_mejora=0
-    parar_nomejora=20
     historico_train=Float64[]
     historico_validation=Float64[]
     historico_test=Float64[]
+    println(size(input_train))
     #println(size(input_train,2))
     #extrae del conjunto de entrenamiento el conjunto de test y validacion
     for i in 1:size(input_train,2)
@@ -267,31 +263,12 @@ function entrenar_RRNNAA(input_train,target_train)
             end
             restar+=1
         end
-        if x%10==3
-            if input_test==nothing
-                input_test=zeros(input_length,1)
-                input_train,input_test[:,1]=extract_and_remove(input_train,i-restar)
-            else
-                aux=zeros(input_length,1)
-                input_train,aux[:,1]=extract_and_remove(input_train,i-restar)
-                input_test=hcat(input_test,aux)
-            end
-            if target_test==nothing
-                target_test=zeros(output_length,1)
-                target_train,target_test[:,1]=extract_and_remove(target_train,i-restar)
-            else
-                aux=zeros(output_length,1)
-                target_train,aux[:,1]=extract_and_remove(target_train,i-restar)
-                target_test=hcat(target_test,aux)
-            end
-            restar+=1
-        end
     end
     ann = Chain(
-        Dense(input_length, 4, σ),
-        #Dense(5, 4, σ),
-        Dense(4, 3, σ),
-        Dense(3, output_length, identity),softmax );
+        Dense(input_length, 130, σ),
+        Dense(130, 110, σ),
+        Dense(110, 90, σ),
+        Dense(90, output_length, identity),softmax );
     
     loss(model,x, y) = Losses.crossentropy(model(x), y)    
     opt_state = Flux.setup(Adam(learningRate), ann)    
@@ -334,10 +311,9 @@ function entrenar_RRNNAA(input_train,target_train)
     # Convertir los valores en bool dependiendo si son mayores o menores que 0.5
     target_test = nearest_to_one_matrix(target_test)
     target_test = Array{Bool}(target_test .> 0.5)
-    printConfusionMatrix(outputP'[:,1],target_test'[:,1])
+    #printConfusionMatrix(outputP',target_test')
+    return outputP',target_test',vlose
     
-
-    return vlose
 end
 
 function nearest_to_one_matrix(matrix::Matrix)
@@ -368,124 +344,41 @@ function nearest_to_one_matrix(matrix::Matrix)
     return result
 end
 
-function entrenar_svm(input_train, target_train)
-    input_test=nothing
-    target_test=nothing
-    restar=0
-    for i in 1:size(input_train,2)
-        x=rand(1:10)
-        if x%10==2
-            if input_test==nothing
-                input_test=zeros(input_length,1)
-                input_train,input_test[:,1]=extract_and_remove(input_train,i-restar)
-            else
-                aux=zeros(input_length,1)
-                input_train,aux[:,1]=extract_and_remove(input_train,i-restar)
-                input_test=hcat(input_test,aux)
-            end
-            if target_test==nothing
-                target_test=zeros(output_length,1)
-                target_train,target_test[:,1]=extract_and_remove(target_train,i-restar)
-            else
-                aux=zeros(output_length,1)
-                target_train,aux[:,1]=extract_and_remove(target_train,i-restar)
-                target_test=hcat(target_test,aux)
-            end
-            restar+=1
-        end
-        
-    end
+function entrenar_svm(input_train, target_train,input_test, target_test)
+    println(size(input_train))
     model = SVC(kernel="rbf", degree=3, gamma=1, C=3);
     fit!(model, input_train', crear_vector(target_train)');
     testOutputs = predict(model, input_test');
     #aux=crear_vector(target_test)'
     #println(aux)
     #printConfusionMatrix(testOutputs,collect(aux))
-    
     aux=(Array{Bool}(target_test .== 1))'
-    printConfusionMatrix(recrear_vector(testOutputs,output_length)[:,1],aux[:,1])
-    # Calcular el error cuadrático medio (MSE)
-    mse = mean((testOutputs .- target_test').^2)
-    # Calcular el error absoluto medio (MAE)
+    #printConfusionMatrix(recrear_vector(testOutputs,output_length),aux)
     mae = mean(abs.(testOutputs .- target_test'))
-    return mse,mae    
+    return recrear_vector(testOutputs,output_length),aux,mae
 end
 
-function entrenar_tree(input_train, target_train)
-    input_test=nothing
-    target_test=nothing
-    restar=0
-    for i in 1:size(input_train,2)
-        x=rand(1:10)
-        if x%10==2
-            if input_test==nothing
-                input_test=zeros(input_length,1)
-                input_train,input_test[:,1]=extract_and_remove(input_train,i-restar)
-            else
-                aux=zeros(input_length,1)
-                input_train,aux[:,1]=extract_and_remove(input_train,i-restar)
-                input_test=hcat(input_test,aux)
-            end
-            if target_test==nothing
-                target_test=zeros(output_length,1)
-                target_train,target_test[:,1]=extract_and_remove(target_train,i-restar)
-            else
-                aux=zeros(output_length,1)
-                target_train,aux[:,1]=extract_and_remove(target_train,i-restar)
-                target_test=hcat(target_test,aux)
-            end
-            restar+=1
-        end
-    end
+function entrenar_tree(input_train, target_train,input_test, target_test)
+    println(size(input_train))
     model = DecisionTreeClassifier(max_depth=2, random_state=1)
     fit!(model, input_train', crear_vector(target_train)');
     testOutputs = predict(model, input_test');
     aux=(Array{Bool}(target_test .> 0.5))'
-    printConfusionMatrix(recrear_vector(testOutputs,output_length)[:,1],aux[:,1])
-    # Calcular el error cuadrático medio (MSE)
-    mse = mean((testOutputs .- target_test').^2)
+    #printConfusionMatrix(recrear_vector(testOutputs,output_length),aux)
     # Calcular el error absoluto medio (MAE)
     mae = mean(abs.(testOutputs .- target_test'))
-    return mse,mae
+    return recrear_vector(testOutputs,output_length),aux,mae
 end
 
-function entrenar_KNe(input_train, target_train)
-    input_test=nothing
-    target_test=nothing
-    restar=0
-    for i in 1:size(input_train,2)
-        x=rand(1:10)
-        if x%10==2
-            if input_test==nothing
-                input_test=zeros(input_length,1)
-                input_train,input_test[:,1]=extract_and_remove(input_train,i-restar)
-            else
-                aux=zeros(input_length,1)
-                input_train,aux[:,1]=extract_and_remove(input_train,i-restar)
-                input_test=hcat(input_test,aux)
-            end
-            if target_test==nothing
-                target_test=zeros(output_length,1)
-                target_train,target_test[:,1]=extract_and_remove(target_train,i-restar)
-            else
-                aux=zeros(output_length,1)
-                target_train,aux[:,1]=extract_and_remove(target_train,i-restar)
-                target_test=hcat(target_test,aux)
-            end
-            restar+=1
-        end
-        
-    end
+function entrenar_KNe(input_train, target_train,input_test, target_test)
+    println(size(input_train))
     model = KNeighborsClassifier(2);
     fit!(model, input_train', crear_vector(target_train)');
     testOutputs = predict(model, input_test');
     aux=(Array{Bool}(target_test .> 0.5))'
-    printConfusionMatrix(recrear_vector(testOutputs,output_length)[:,1],aux[:,1])
-    # Calcular el error cuadrático medio (MSE)
-    mse = mean((testOutputs .- target_test').^2)
-    # Calcular el error absoluto medio (MAE)
+    #printConfusionMatrix(recrear_vector(testOutputs,output_length),aux)
     mae = mean(abs.(testOutputs .- target_test'))
-    return mse,mae
+    return recrear_vector(testOutputs,output_length),aux,mae
 end
 
 function crear_vector(matriz::Matrix{Float64})
@@ -514,7 +407,7 @@ function recrear_vector(array,size::Int)
     #return Array{Bool}(array .> 0.5)
 end
 
-function FFT_data(input_wav1::String, value::Int)
+function FFT_data(input_wav1::String, value::Int, folder_names)
     # El target de debe cambiar
     canales, frecuencia_muestreo, tasa_bits_codificacion, tamano = obtener_info_wav(input_wav1)
     input = gen_input(input_wav1)
@@ -528,7 +421,7 @@ function FFT_data(input_wav1::String, value::Int)
     for i in 1:input_size
         aux = reshape(input1[:, i], 1, length(input1[:, i]))
         input_aux = zeros(input_length, 1)
-        input_aux[1, 1], input_aux[input_length, 1] = mirar2notas(aux, frecuencia_muestreo, 0, 0)
+        input_aux[:, 1] .= mirartodasnotas(aux, frecuencia_muestreo, folder_names)
         target_aux = zeros(output_length, 1)
         target_aux[value, 1] = 1.0
         inputs[:, i] .= input_aux
@@ -536,6 +429,16 @@ function FFT_data(input_wav1::String, value::Int)
     end
 
     return inputs, targets
+end
+
+function mirartodasnotas(input::Matrix{Float64},frecuencia::Float32,folder_names)
+    res = zeros(Float64, 2 * length(folder_names)) 
+    i=1
+    for note in folder_names
+        res[i],res[i+1]=mirar2notas(input,frecuencia,note)
+        i=i+2
+    end
+    return res
 end
 
 function extract_and_remove(matrix::AbstractMatrix, col_index::Integer)
@@ -549,7 +452,9 @@ function extract_and_remove(matrix::AbstractMatrix, col_index::Integer)
     end
 end
 
-function mirar2notas(input::Matrix{Float64},frecuencia::Float32,note1::Int, note2::Int)
+
+
+function mirar2notas(input::Matrix{Float64},frecuencia::Float32,note::Float16)
 
     #canales, Fs, tasa_bits_codificacion,tamano = obtener_info_wav(input_wav)
     #input_org = gen_input(input_wav)
@@ -559,7 +464,7 @@ function mirar2notas(input::Matrix{Float64},frecuencia::Float32,note1::Int, note
     
     n = size(input,2);
     # Que frecuenicas queremos coger
-    f1 = note1; f2 = note2;
+    f1 = note*0.95; f2=note*1.05;
     Fs=frecuencia;
 
     #println("$(n) muestras con una frecuencia de $(Fs) muestras/seg: $(n/Fs) seg.")
@@ -602,7 +507,6 @@ function mirar2notas(input::Matrix{Float64},frecuencia::Float32,note1::Int, note
     #  Como limite se puede tomar la mitad de la frecuencia de muestreo
 
     # recortamos la mitad no necesaria
-    f1 = 1; f2 =Int(round(length(senalFrecuencia)/2));
 
     m1 = Int(round(f1*2*length(senalFrecuencia)/Fs));
     m2 = Int(round(f2*2*length(senalFrecuencia)/Fs));
@@ -625,6 +529,68 @@ function accuracy(outputs::AbstractArray{Bool,2}, targets::AbstractArray{Bool,2}
     else
         return mean(all(targets .== outputs, dims=2));
     end;
+end;
+
+function confusionMatrix(outputs::AbstractArray{Bool,2}, targets::AbstractArray{Bool,2}; weighted::Bool=true)
+    @assert(size(outputs)==size(targets));
+    numClasses = size(targets,2);
+    # Nos aseguramos de que no hay dos columnas
+    @assert(numClasses!=2);
+    if (numClasses==1)
+        return confusionMatrix(outputs[:,1], targets[:,1]);
+    end;
+
+    # Nos aseguramos de que en cada fila haya uno y sólo un valor a true
+    @assert(all(sum(outputs, dims=2).==1));
+    # Reservamos memoria para las metricas de cada clase, inicializandolas a 0 porque algunas posiblemente no se calculen
+    recall      = zeros(numClasses);
+    specificity = zeros(numClasses);
+    precision   = zeros(numClasses);
+    NPV         = zeros(numClasses);
+    F1          = zeros(numClasses);
+    # Calculamos el numero de patrones de cada clase
+    numInstancesFromEachClass = vec(sum(targets, dims=1));
+    # Calculamos las metricas para cada clase, esto se haria con un bucle similar a "for numClass in 1:numClasses" que itere por todas las clases
+    #  Sin embargo, solo hacemos este calculo para las clases que tengan algun patron
+    #  Puede ocurrir que alguna clase no tenga patrones como consecuencia de haber dividido de forma aleatoria el conjunto de patrones entrenamiento/test
+    #  En aquellas clases en las que no haya patrones, los valores de las metricas seran 0 (los vectores ya estan asignados), y no se tendran en cuenta a la hora de unir estas metricas
+    for numClass in findall(numInstancesFromEachClass.>0)
+        # Calculamos las metricas de cada problema binario correspondiente a cada clase y las almacenamos en los vectores correspondientes
+        (_, _, recall[numClass], specificity[numClass], precision[numClass], NPV[numClass], F1[numClass], _) = confusionMatrix(outputs[:,numClass], targets[:,numClass]);
+    end;
+
+    # Reservamos memoria para la matriz de confusion
+    confMatrix = Array{Int64,2}(undef, numClasses, numClasses);
+    # Calculamos la matriz de confusión haciendo un bucle doble que itere sobre las clases
+    for numClassTarget in 1:numClasses, numClassOutput in 1:numClasses
+        # Igual que antes, ponemos en las filas los que pertenecen a cada clase (targets) y en las columnas los clasificados (outputs)
+        confMatrix[numClassTarget, numClassOutput] = sum(targets[:,numClassTarget] .& outputs[:,numClassOutput]);
+    end;
+
+    # Aplicamos las forma de combinar las metricas macro o weighted
+    if weighted
+        # Calculamos los valores de ponderacion para hacer el promedio
+        weights = numInstancesFromEachClass./sum(numInstancesFromEachClass);
+        recall      = sum(weights.*recall);
+        specificity = sum(weights.*specificity);
+        precision   = sum(weights.*precision);
+        NPV         = sum(weights.*NPV);
+        F1          = sum(weights.*F1);
+    else
+        # No realizo la media tal cual con la funcion mean, porque puede haber clases sin instancias
+        #  En su lugar, realizo la media solamente de las clases que tengan instancias
+        numClassesWithInstances = sum(numInstancesFromEachClass.>0);
+        recall      = sum(recall)/numClassesWithInstances;
+        specificity = sum(specificity)/numClassesWithInstances;
+        precision   = sum(precision)/numClassesWithInstances;
+        NPV         = sum(NPV)/numClassesWithInstances;
+        F1          = sum(F1)/numClassesWithInstances;
+    end;
+    # Precision y tasa de error las calculamos con las funciones definidas previamente
+    acc = accuracy(outputs, targets);
+    errorRate = 1 - acc;
+
+    return (acc, errorRate, recall, specificity, precision, NPV, F1, confMatrix);
 end;
 
 function confusionMatrix(outputs::AbstractArray{Bool,1}, targets::AbstractArray{Bool,1})
@@ -667,6 +633,42 @@ function confusionMatrix(outputs::AbstractArray{Bool,1}, targets::AbstractArray{
 end;
 
 
+
+function printConfusionMatrix(outputs::AbstractArray{Bool,2}, targets::AbstractArray{Bool,2}; weighted::Bool=true)
+    (acc, errorRate, recall, specificity, precision, NPV, F1, confMatrix) = confusionMatrix(outputs, targets; weighted=weighted);
+    numClasses = size(confMatrix,1);
+    writeHorizontalLine() = (for i in 1:numClasses+1 print("--------") end; println(""); );
+    writeHorizontalLine();
+    print("\t| ");
+    if (numClasses==2)
+        println(" - \t + \t|");
+    else
+        print.("Cl. ", 1:numClasses, "\t| ");
+    end;
+    println("");
+    writeHorizontalLine();
+    for numClassTarget in 1:numClasses
+        # print.(confMatrix[numClassTarget,:], "\t");
+        if (numClasses==2)
+            print(numClassTarget == 1 ? " - \t| " : " + \t| ");
+        else
+            print("Cl. ", numClassTarget, "\t| ");
+        end;
+        print.(confMatrix[numClassTarget,:], "\t| ");
+        println("");
+        writeHorizontalLine();
+    end;
+    println("Accuracy: ", acc);
+    println("Error rate: ", errorRate);
+    println("Recall: ", recall);
+    println("Specificity: ", specificity);
+    println("Precision: ", precision);
+    println("Negative predictive value: ", NPV);
+    println("F1-score: ", F1);
+    return (acc, errorRate, recall, specificity, precision, NPV, F1, confMatrix);
+end;
+
+
 function printConfusionMatrix(outputs::AbstractArray{Bool,1}, targets::AbstractArray{Bool,1})
     (acc, errorRate, recall, specificity, precision, NPV, F1, confMatrix) = confusionMatrix(outputs, targets)
 
@@ -683,9 +685,74 @@ function printConfusionMatrix(outputs::AbstractArray{Bool,1}, targets::AbstractA
 end
 #fin CODIGO COPY
 
+function ejecutar_crosscalidation(input,target)
+    columnas_totales = size(input, 2)
+    indices = collect(1:columnas_totales)
+    output_data=nothing
+    target_data=nothing
+    lose=0
+    veces=0
+    Random.shuffle!(indices)
+
+    for i in 1:kfold:columnas_totales
+        grupo_actual = min(i + (kfold-1), columnas_totales)  # Asegura que el último grupo no exceda el tamaño total
+        columnas_grupo = indices[i:grupo_actual]
+        columnas_restantes = setdiff(indices, columnas_grupo)
+        if output_data==nothing
+            #output_data,target_data,lose_aux=entrenar_RRNNAA(input[:, columnas_restantes],target[:, columnas_restantes],input[:, columnas_grupo], target[:, columnas_grupo])
+            #output_data,target_data,lose_aux=entrenar_tree(input[:, columnas_restantes],target[:, columnas_restantes],input[:, columnas_grupo], target[:, columnas_grupo])
+            output_data,target_data,lose_aux=entrenar_svm(input[:, columnas_restantes],target[:, columnas_restantes],input[:, columnas_grupo], target[:, columnas_grupo])
+            #output_data,target_data,lose_aux=entrenar_KNe(input[:, columnas_restantes],target[:, columnas_restantes],input[:, columnas_grupo], target[:, columnas_grupo])
+            lose=lose_aux+lose
+        else
+            #output_aux,target_aux,lose_aux=entrenar_RRNNAA(input[:, columnas_restantes],target[:, columnas_restantes],input[:, columnas_grupo], target[:, columnas_grupo])
+            #output_aux,target_aux,lose_aux=entrenar_tree(input[:, columnas_restantes],target[:, columnas_restantes],input[:, columnas_grupo], target[:, columnas_grupo])
+            output_aux,target_aux,lose_aux=entrenar_svm(input[:, columnas_restantes],target[:, columnas_restantes],input[:, columnas_grupo], target[:, columnas_grupo])
+            #output_aux,target_aux,lose_aux=entrenar_KNe(input[:, columnas_restantes],target[:, columnas_restantes],input[:, columnas_grupo], target[:, columnas_grupo])
+            lose=lose+lose_aux
+            vcat(output_data,output_aux)
+            vcat(target_data,target_aux)
+        end
+        veces=veces+1
+    end
+    #println("-RRNNAA:")
+    printConfusionMatrix(output_data,target_data)
+    println("Error: ",(lose/veces))
+    println()
+    
+end
 
 #canales, Fs, tasa_bits_codificacion,tamano = obtener_info_wav("train_data/01.wav")
 #println(size(gen_input("train_data/01.wav")))
 #mirar2notas(gen_input("train_data/01.wav"),Fs,10000,20000)
 #entrenar("train_data/01.wav","train_data/55.wav",10,20,80,90)    
-procesar_archivos("carpeta_input");
+#procesar_archivos("carpeta_input");
+archivo = open("input.txt", "r")
+input = readdlm(archivo)
+close(archivo)
+
+archivo = open("target.txt", "r")
+target = readdlm(archivo)
+close(archivo)
+
+ejecutar_crosscalidation(input,target)
+
+#=println()
+println("-RRNNAA:")
+lose=entrenar_RRNNAA(input, target)
+println("Error RRNNAA: ",lose)
+println()
+println("-SMV:")
+mse,mae=entrenar_svm(input, target)
+println("SVM MSE:",mse)
+println("SVM MAE:",mae)
+println()
+println("-TREE:")
+mse,mae=entrenar_tree(input, target)
+println("TREE MSE:",mse)
+println("TREE MAE:",mae)
+println()
+println("-KNe:")
+mse,mae=entrenar_KNe(input, target)
+println("KNe MSE:",mse)
+println("KNe MAE:",mae)=#
