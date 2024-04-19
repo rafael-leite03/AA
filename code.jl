@@ -10,6 +10,8 @@ using Random
 using Flux.Losses
 using ScikitLearn
 using DelimitedFiles
+using StatsPlots
+using Statistics
 @sk_import svm:SVC
 @sk_import tree:DecisionTreeClassifier
 @sk_import neighbors:KNeighborsClassifier
@@ -18,7 +20,7 @@ using DelimitedFiles
 muestras_input=65536#potencia de 2 mayor o igual que cuatro
 output_length=82
 input_length=164
-kfold=300
+kfold=10
 
 #Saca en un array los datos de .wav
 function gen_input(ruta_archivo::AbstractString)
@@ -264,6 +266,29 @@ function entrenar_RRNNAA(input_train,target_train,input_test,target_test)
             restar+=1
         end
     end
+    restar=0
+    for i in 1:size(input_test,2)
+        x=rand(1:10)
+        if x%10==2||x%10==6
+            if input_validation==nothing
+                input_validation=zeros(input_length,1)
+                input_test,input_validation[:,1]=extract_and_remove(input_test,i-restar)
+            else
+                aux=zeros(input_length,1)
+                input_test,aux[:,1]=extract_and_remove(input_test,i-restar)
+                input_validation=hcat(input_validation,aux)
+            end
+            if target_validation==nothing
+                target_validation=zeros(output_length,1)
+                target_test,target_validation[:,1]=extract_and_remove(target_test,i-restar)
+            else
+                aux=zeros(output_length,1)
+                target_test,aux[:,1]=extract_and_remove(target_test,i-restar)
+                target_validation=hcat(target_validation,aux)
+            end
+            restar+=1
+        end
+    end
     ann = Chain(
         Dense(input_length, 130, σ),
         Dense(130, 110, σ),
@@ -346,7 +371,7 @@ end
 
 function entrenar_svm(input_train, target_train,input_test, target_test)
     println(size(input_train))
-    model = SVC(kernel="rbf", degree=3, gamma=1, C=3);
+    model = SVC(kernel="rbf", degree=5, gamma=3, C=2);
     fit!(model, input_train', crear_vector(target_train)');
     testOutputs = predict(model, input_test');
     #aux=crear_vector(target_test)'
@@ -517,10 +542,6 @@ function mirar2notas(input::Matrix{Float64},frecuencia::Float32,note::Float16)
     return mean(senalFrecuencia[m1:m2]),std(senalFrecuencia[m1:m2])
 end
 
-#CODIGO COPY 
-
-
-
 accuracy(outputs::AbstractArray{Bool,1}, targets::AbstractArray{Bool,1}) = mean(outputs.==targets);
 function accuracy(outputs::AbstractArray{Bool,2}, targets::AbstractArray{Bool,2})
     @assert(all(size(outputs).==size(targets)));
@@ -682,8 +703,9 @@ function printConfusionMatrix(outputs::AbstractArray{Bool,1}, targets::AbstractA
     println("Negative Predictive Value: $NPV")
     println("F1 Score: $F1")
     println(" ")
+
 end
-#fin CODIGO COPY
+
 
 function ejecutar_crosscalidation(input,target)
     columnas_totales = size(input, 2)
@@ -693,40 +715,81 @@ function ejecutar_crosscalidation(input,target)
     lose=0
     veces=0
     Random.shuffle!(indices)
+    kfold_size=round(Int,columnas_totales/kfold)
 
-    for i in 1:kfold:columnas_totales
-        grupo_actual = min(i + (kfold-1), columnas_totales)  # Asegura que el último grupo no exceda el tamaño total
+    for i in 1:kfold_size:columnas_totales
+        grupo_actual = min(i + (kfold_size-1), columnas_totales)  # Asegura que el último grupo no exceda el tamaño total
         columnas_grupo = indices[i:grupo_actual]
         columnas_restantes = setdiff(indices, columnas_grupo)
         if output_data==nothing
             #output_data,target_data,lose_aux=entrenar_RRNNAA(input[:, columnas_restantes],target[:, columnas_restantes],input[:, columnas_grupo], target[:, columnas_grupo])
             #output_data,target_data,lose_aux=entrenar_tree(input[:, columnas_restantes],target[:, columnas_restantes],input[:, columnas_grupo], target[:, columnas_grupo])
-            output_data,target_data,lose_aux=entrenar_svm(input[:, columnas_restantes],target[:, columnas_restantes],input[:, columnas_grupo], target[:, columnas_grupo])
-            #output_data,target_data,lose_aux=entrenar_KNe(input[:, columnas_restantes],target[:, columnas_restantes],input[:, columnas_grupo], target[:, columnas_grupo])
+            #output_data,target_data,lose_aux=entrenar_svm(input[:, columnas_restantes],target[:, columnas_restantes],input[:, columnas_grupo], target[:, columnas_grupo])
+            output_data,target_data,lose_aux=entrenar_KNe(input[:, columnas_restantes],target[:, columnas_restantes],input[:, columnas_grupo], target[:, columnas_grupo])
             lose=lose_aux+lose
         else
             #output_aux,target_aux,lose_aux=entrenar_RRNNAA(input[:, columnas_restantes],target[:, columnas_restantes],input[:, columnas_grupo], target[:, columnas_grupo])
             #output_aux,target_aux,lose_aux=entrenar_tree(input[:, columnas_restantes],target[:, columnas_restantes],input[:, columnas_grupo], target[:, columnas_grupo])
-            output_aux,target_aux,lose_aux=entrenar_svm(input[:, columnas_restantes],target[:, columnas_restantes],input[:, columnas_grupo], target[:, columnas_grupo])
-            #output_aux,target_aux,lose_aux=entrenar_KNe(input[:, columnas_restantes],target[:, columnas_restantes],input[:, columnas_grupo], target[:, columnas_grupo])
+            #output_aux,target_aux,lose_aux=entrenar_svm(input[:, columnas_restantes],target[:, columnas_restantes],input[:, columnas_grupo], target[:, columnas_grupo])
+            output_aux,target_aux,lose_aux=entrenar_KNe(input[:, columnas_restantes],target[:, columnas_restantes],input[:, columnas_grupo], target[:, columnas_grupo])
             lose=lose+lose_aux
-            vcat(output_data,output_aux)
-            vcat(target_data,target_aux)
+            output_data=vcat(output_data,output_aux)
+            target_data=vcat(target_data,target_aux)
+            
         end
         veces=veces+1
     end
+
+    function matriz_bools_a_clases(matriz)
+        clases = []
+        for fila in eachrow(matriz)
+            push!(clases, findfirst(fila))
+        end
+        return clases
+    end
+
+    # Convertir la matriz a un vector de clases
+    clases = matriz_bools_a_clases(target_data)
+
+    # Calcular la cantidad de datos por clase
+    conteo_clases = Dict{Int, Int}()
+    for c in clases
+        conteo_clases[c] = get(conteo_clases, c, 0) + 1
+    end
+
+
+    # Ordenar el conteo por clases
+    clases_ordenadas = sort(collect(keys(conteo_clases)))
+    cantidad_datos = [get(conteo_clases, c, 0) for c in clases_ordenadas]
+
+    # Crear la gráfica de barras
+    p=bar(clases_ordenadas, cantidad_datos, xlabel="Clase", ylabel="Cantidad de datos", 
+        title="Cantidad de datos por clase")
+    display(p)
+
+
+
+    mse_per_class = (target_data .- output_data) .^ 2
+
+    gr();
+    class_labels = ["Clase $i" for i in 1:output_length]
+    p = boxplot(class_labels, mse_per_class', xlabel="Class", ylabel="Mean Squared Error", title="Boxplot of Mean Squared Error per Class", size=(1920, 1080)) # Tamaño ajustado    
+    display(p)
+    # Calcula la desviación típica
+    suma_cuadrados = sum((output_data .- target_data).^2)
+    N = length(output_data)
+    desviacion_tipica = sqrt(suma_cuadrados / N)
     #println("-RRNNAA:")
+    println(size(output_data))
     printConfusionMatrix(output_data,target_data)
+    println("Desviacion tipica: ",desviacion_tipica)
     println("Error: ",(lose/veces))
     println()
     
 end
 
-#canales, Fs, tasa_bits_codificacion,tamano = obtener_info_wav("train_data/01.wav")
-#println(size(gen_input("train_data/01.wav")))
-#mirar2notas(gen_input("train_data/01.wav"),Fs,10000,20000)
-#entrenar("train_data/01.wav","train_data/55.wav",10,20,80,90)    
 #procesar_archivos("carpeta_input");
+
 archivo = open("input.txt", "r")
 input = readdlm(archivo)
 close(archivo)
@@ -736,23 +799,3 @@ target = readdlm(archivo)
 close(archivo)
 
 ejecutar_crosscalidation(input,target)
-
-#=println()
-println("-RRNNAA:")
-lose=entrenar_RRNNAA(input, target)
-println("Error RRNNAA: ",lose)
-println()
-println("-SMV:")
-mse,mae=entrenar_svm(input, target)
-println("SVM MSE:",mse)
-println("SVM MAE:",mae)
-println()
-println("-TREE:")
-mse,mae=entrenar_tree(input, target)
-println("TREE MSE:",mse)
-println("TREE MAE:",mae)
-println()
-println("-KNe:")
-mse,mae=entrenar_KNe(input, target)
-println("KNe MSE:",mse)
-println("KNe MAE:",mae)=#
