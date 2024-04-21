@@ -759,7 +759,7 @@ function ejecutar_crosscalidation(input,target)
         veces=veces+1
     end
     error_data=calcular_mse_por_clase(output_data, target_data)
-    println()
+    println(size(output_data))
     error_data = replace(error_data, NaN => 0)
     gr();
     class_labels = ["Clase $i" for i in 1:output_length]
