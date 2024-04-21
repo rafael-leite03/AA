@@ -706,12 +706,29 @@ function printConfusionMatrix(outputs::AbstractArray{Bool,1}, targets::AbstractA
 
 end
 
+function calcular_mse_por_clase(resultados, targets)
+    num_muestras, num_clases = size(targets)
+    mse_por_clase = similar(1:num_clases, Float64) # Vector para almacenar el MSE por clase
+    
+    for clase in 1:num_clases
+        # Obtener los resultados y objetivos para esa clase
+        targets_clase = targets[:, clase]
+        resultados_clase = resultados[findall(targets_clase), clase]  # Solo considerar las muestras donde la clase es verdadera
+        
+        # Calcular el MSE para la clase específica
+        mse_por_clase[clase] = mean((resultados_clase .- targets_clase[findall(targets_clase)]) .^ 2)
+    end
+
+    return mse_por_clase
+end
+
 
 function ejecutar_crosscalidation(input,target)
     columnas_totales = size(input, 2)
     indices = collect(1:columnas_totales)
     output_data=nothing
     target_data=nothing
+    error_data=nothing
     lose=0
     veces=0
     Random.shuffle!(indices)
@@ -727,60 +744,33 @@ function ejecutar_crosscalidation(input,target)
             #output_data,target_data,lose_aux=entrenar_svm(input[:, columnas_restantes],target[:, columnas_restantes],input[:, columnas_grupo], target[:, columnas_grupo])
             output_data,target_data,lose_aux=entrenar_KNe(input[:, columnas_restantes],target[:, columnas_restantes],input[:, columnas_grupo], target[:, columnas_grupo])
             lose=lose_aux+lose
+            #error_data=calcular_mse_por_clase(output_data, target_data)
         else
             #output_aux,target_aux,lose_aux=entrenar_RRNNAA(input[:, columnas_restantes],target[:, columnas_restantes],input[:, columnas_grupo], target[:, columnas_grupo])
             #output_aux,target_aux,lose_aux=entrenar_tree(input[:, columnas_restantes],target[:, columnas_restantes],input[:, columnas_grupo], target[:, columnas_grupo])
             #output_aux,target_aux,lose_aux=entrenar_svm(input[:, columnas_restantes],target[:, columnas_restantes],input[:, columnas_grupo], target[:, columnas_grupo])
             output_aux,target_aux,lose_aux=entrenar_KNe(input[:, columnas_restantes],target[:, columnas_restantes],input[:, columnas_grupo], target[:, columnas_grupo])
             lose=lose+lose_aux
+            #error_data=hcat(error_data,calcular_mse_por_clase(output_aux, target_aux))
             output_data=vcat(output_data,output_aux)
             target_data=vcat(target_data,target_aux)
             
         end
         veces=veces+1
     end
-
-    function matriz_bools_a_clases(matriz)
-        clases = []
-        for fila in eachrow(matriz)
-            push!(clases, findfirst(fila))
-        end
-        return clases
-    end
-
-    # Convertir la matriz a un vector de clases
-    clases = matriz_bools_a_clases(target_data)
-
-    # Calcular la cantidad de datos por clase
-    conteo_clases = Dict{Int, Int}()
-    for c in clases
-        conteo_clases[c] = get(conteo_clases, c, 0) + 1
-    end
-
-
-    # Ordenar el conteo por clases
-    clases_ordenadas = sort(collect(keys(conteo_clases)))
-    cantidad_datos = [get(conteo_clases, c, 0) for c in clases_ordenadas]
-
-    # Crear la gráfica de barras
-    p=bar(clases_ordenadas, cantidad_datos, xlabel="Clase", ylabel="Cantidad de datos", 
-        title="Cantidad de datos por clase")
-    display(p)
-
-
-
-    mse_per_class = (target_data .- output_data) .^ 2
-
+    error_data=calcular_mse_por_clase(output_data, target_data)
+    println()
+    error_data = replace(error_data, NaN => 0)
     gr();
     class_labels = ["Clase $i" for i in 1:output_length]
-    p = boxplot(class_labels, mse_per_class', xlabel="Class", ylabel="Mean Squared Error", title="Boxplot of Mean Squared Error per Class", size=(1920, 1080)) # Tamaño ajustado    
+    p = boxplot(class_labels, error_data, xlabel="Class", ylabel="Mean Squared Error", title="Boxplot of Mean Squared Error per Class", size=(1920, 1080)) # Tamaño ajustado    
     display(p)
+
     # Calcula la desviación típica
     suma_cuadrados = sum((output_data .- target_data).^2)
     N = length(output_data)
     desviacion_tipica = sqrt(suma_cuadrados / N)
     #println("-RRNNAA:")
-    println(size(output_data))
     printConfusionMatrix(output_data,target_data)
     println("Desviacion tipica: ",desviacion_tipica)
     println("Error: ",(lose/veces))
