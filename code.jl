@@ -706,20 +706,20 @@ function printConfusionMatrix(outputs::AbstractArray{Bool,1}, targets::AbstractA
 
 end
 
-function calcular_mse_por_clase(resultados, targets)
+function calcular_accuracy_por_clase(resultados, targets)
     num_muestras, num_clases = size(targets)
-    mse_por_clase = similar(1:num_clases, Float64) # Vector para almacenar el MSE por clase
+    accuracy_por_clase = similar(1:num_clases, Float64) # Vector para almacenar la precisión por clase
     
     for clase in 1:num_clases
         # Obtener los resultados y objetivos para esa clase
         targets_clase = targets[:, clase]
         resultados_clase = resultados[findall(targets_clase), clase]  # Solo considerar las muestras donde la clase es verdadera
         
-        # Calcular el MSE para la clase específica
-        mse_por_clase[clase] = mean((resultados_clase .- targets_clase[findall(targets_clase)]) .^ 2)
+        # Calcular la precisión para la clase específica
+        accuracy_por_clase[clase] = sum(resultados_clase .== targets_clase[findall(targets_clase)]) / length(targets_clase[findall(targets_clase)])
     end
 
-    return mse_por_clase
+    return accuracy_por_clase
 end
 
 
@@ -728,7 +728,7 @@ function ejecutar_crosscalidation(input,target)
     indices = collect(1:columnas_totales)
     output_data=nothing
     target_data=nothing
-    error_data=nothing
+    error_data=[]
     lose=0
     veces=0
     Random.shuffle!(indices)
@@ -744,14 +744,14 @@ function ejecutar_crosscalidation(input,target)
             #output_data,target_data,lose_aux=entrenar_svm(input[:, columnas_restantes],target[:, columnas_restantes],input[:, columnas_grupo], target[:, columnas_grupo])
             output_data,target_data,lose_aux=entrenar_KNe(input[:, columnas_restantes],target[:, columnas_restantes],input[:, columnas_grupo], target[:, columnas_grupo])
             lose=lose_aux+lose
-            error_data=vec(calcular_mse_por_clase(output_data, target_data))
+            push!(error_data, accuracy(output_data,target_data))
         else
             #output_aux,target_aux,lose_aux=entrenar_RRNNAA(input[:, columnas_restantes],target[:, columnas_restantes],input[:, columnas_grupo], target[:, columnas_grupo])
             #output_aux,target_aux,lose_aux=entrenar_tree(input[:, columnas_restantes],target[:, columnas_restantes],input[:, columnas_grupo], target[:, columnas_grupo])
             #output_aux,target_aux,lose_aux=entrenar_svm(input[:, columnas_restantes],target[:, columnas_restantes],input[:, columnas_grupo], target[:, columnas_grupo])
             output_aux,target_aux,lose_aux=entrenar_KNe(input[:, columnas_restantes],target[:, columnas_restantes],input[:, columnas_grupo], target[:, columnas_grupo])
             lose=lose+lose_aux
-            error_data=hcat(error_data,vec(calcular_mse_por_clase(output_aux, target_aux)))
+            push!(error_data, accuracy(output_aux,target_aux))
             output_data=vcat(output_data,output_aux)
             target_data=vcat(target_data,target_aux)
             
@@ -786,11 +786,11 @@ function ejecutar_crosscalidation(input,target)
         title="Cantidad de datos por clase")
     display(p)
 
-    println(size(error_data))
+    println(error_data)
 
     #error_data=calcular_mse_por_clase(output_data, target_data)
     println(size(output_data))
-    error_data = replace(error_data, NaN => 0)
+    #error_data = replace(error_data, NaN => 0.0)
     gr();
     class_labels = ["Clase $i" for i in 1:output_length]
     p = boxplot( error_data, xlabel="Class", ylabel="Mean Squared Error", title="Boxplot of Mean Squared Error per Class", size=(1920, 1080)) # Tamaño ajustado    
