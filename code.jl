@@ -758,6 +758,34 @@ function ejecutar_crosscalidation(input,target)
         end
         veces=veces+1
     end
+
+    function matriz_bools_a_clases(matriz)
+        clases = []
+        for fila in eachrow(matriz)
+            push!(clases, findfirst(fila))
+        end
+        return clases
+    end
+
+    # Convertir la matriz a un vector de clases
+    clases = matriz_bools_a_clases(target_data)
+
+    # Calcular la cantidad de datos por clase
+    conteo_clases = Dict{Int, Int}()
+    for c in clases
+        conteo_clases[c] = get(conteo_clases, c, 0) + 1
+    end
+
+
+    # Ordenar el conteo por clases
+    clases_ordenadas = sort(collect(keys(conteo_clases)))
+    cantidad_datos = [get(conteo_clases, c, 0) for c in clases_ordenadas]
+
+    # Crear la gráfica de barras
+    p=bar(clases_ordenadas, cantidad_datos, xlabel="Clase", ylabel="Cantidad de datos", 
+        title="Cantidad de datos por clase")
+    display(p)
+
     error_data=calcular_mse_por_clase(output_data, target_data)
     println(size(output_data))
     error_data = replace(error_data, NaN => 0)
