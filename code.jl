@@ -732,7 +732,7 @@ function ejecutar_crosscalidation(input,target)
     lose=0
     veces=0
     Random.shuffle!(indices)
-    kfold_size=round(Int,columnas_totales/kfold)
+    kfold_size=round(Int,columnas_totales/kfold+1)
 
     for i in 1:kfold_size:columnas_totales
         grupo_actual = min(i + (kfold_size-1), columnas_totales)  # Asegura que el último grupo no exceda el tamaño total
@@ -744,14 +744,14 @@ function ejecutar_crosscalidation(input,target)
             #output_data,target_data,lose_aux=entrenar_svm(input[:, columnas_restantes],target[:, columnas_restantes],input[:, columnas_grupo], target[:, columnas_grupo])
             output_data,target_data,lose_aux=entrenar_KNe(input[:, columnas_restantes],target[:, columnas_restantes],input[:, columnas_grupo], target[:, columnas_grupo])
             lose=lose_aux+lose
-            #error_data=calcular_mse_por_clase(output_data, target_data)
+            error_data=vec(calcular_mse_por_clase(output_data, target_data))
         else
             #output_aux,target_aux,lose_aux=entrenar_RRNNAA(input[:, columnas_restantes],target[:, columnas_restantes],input[:, columnas_grupo], target[:, columnas_grupo])
             #output_aux,target_aux,lose_aux=entrenar_tree(input[:, columnas_restantes],target[:, columnas_restantes],input[:, columnas_grupo], target[:, columnas_grupo])
             #output_aux,target_aux,lose_aux=entrenar_svm(input[:, columnas_restantes],target[:, columnas_restantes],input[:, columnas_grupo], target[:, columnas_grupo])
             output_aux,target_aux,lose_aux=entrenar_KNe(input[:, columnas_restantes],target[:, columnas_restantes],input[:, columnas_grupo], target[:, columnas_grupo])
             lose=lose+lose_aux
-            #error_data=hcat(error_data,calcular_mse_por_clase(output_aux, target_aux))
+            error_data=hcat(error_data,vec(calcular_mse_por_clase(output_aux, target_aux)))
             output_data=vcat(output_data,output_aux)
             target_data=vcat(target_data,target_aux)
             
@@ -786,12 +786,14 @@ function ejecutar_crosscalidation(input,target)
         title="Cantidad de datos por clase")
     display(p)
 
-    error_data=calcular_mse_por_clase(output_data, target_data)
+    println(size(error_data))
+
+    #error_data=calcular_mse_por_clase(output_data, target_data)
     println(size(output_data))
     error_data = replace(error_data, NaN => 0)
     gr();
     class_labels = ["Clase $i" for i in 1:output_length]
-    p = boxplot(class_labels, error_data, xlabel="Class", ylabel="Mean Squared Error", title="Boxplot of Mean Squared Error per Class", size=(1920, 1080)) # Tamaño ajustado    
+    p = boxplot( error_data, xlabel="Class", ylabel="Mean Squared Error", title="Boxplot of Mean Squared Error per Class", size=(1920, 1080)) # Tamaño ajustado    
     display(p)
 
     # Calcula la desviación típica
