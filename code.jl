@@ -723,7 +723,7 @@ function calcular_accuracy_por_clase(resultados, targets)
 end
 
 
-function ejecutar_crosscalidation(input,target)
+function ejecutar_crosscalidation(input,target,arquitectura)
     columnas_totales = size(input, 2)
     indices = collect(1:columnas_totales)
     output_data=nothing
@@ -739,17 +739,31 @@ function ejecutar_crosscalidation(input,target)
         columnas_grupo = indices[i:grupo_actual]
         columnas_restantes = setdiff(indices, columnas_grupo)
         if output_data==nothing
-            #output_data,target_data,lose_aux=entrenar_RRNNAA(input[:, columnas_restantes],target[:, columnas_restantes],input[:, columnas_grupo], target[:, columnas_grupo])
-            #output_data,target_data,lose_aux=entrenar_tree(input[:, columnas_restantes],target[:, columnas_restantes],input[:, columnas_grupo], target[:, columnas_grupo])
-            #output_data,target_data,lose_aux=entrenar_svm(input[:, columnas_restantes],target[:, columnas_restantes],input[:, columnas_grupo], target[:, columnas_grupo])
-            output_data,target_data,lose_aux=entrenar_KNe(input[:, columnas_restantes],target[:, columnas_restantes],input[:, columnas_grupo], target[:, columnas_grupo])
+            if arquitectura == 1
+                output_data, target_data, lose_aux = entrenar_RRNNAA(input[:, columnas_restantes], target[:, columnas_restantes], input[:, columnas_grupo], target[:, columnas_grupo])
+            elseif arquitectura == 2
+                output_data, target_data, lose_aux = entrenar_tree(input[:, columnas_restantes], target[:, columnas_restantes], input[:, columnas_grupo], target[:, columnas_grupo])
+            elseif arquitectura == 3
+                output_data, target_data, lose_aux = entrenar_svm(input[:, columnas_restantes], target[:, columnas_restantes], input[:, columnas_grupo], target[:, columnas_grupo])
+            elseif arquitectura == 4
+                output_data, target_data, lose_aux = entrenar_KNe(input[:, columnas_restantes], target[:, columnas_restantes], input[:, columnas_grupo], target[:, columnas_grupo])
+            else
+                println("Estado no válido")
+            end
             lose=lose_aux+lose
             push!(error_data, accuracy(output_data,target_data))
         else
-            #output_aux,target_aux,lose_aux=entrenar_RRNNAA(input[:, columnas_restantes],target[:, columnas_restantes],input[:, columnas_grupo], target[:, columnas_grupo])
-            #output_aux,target_aux,lose_aux=entrenar_tree(input[:, columnas_restantes],target[:, columnas_restantes],input[:, columnas_grupo], target[:, columnas_grupo])
-            #output_aux,target_aux,lose_aux=entrenar_svm(input[:, columnas_restantes],target[:, columnas_restantes],input[:, columnas_grupo], target[:, columnas_grupo])
-            output_aux,target_aux,lose_aux=entrenar_KNe(input[:, columnas_restantes],target[:, columnas_restantes],input[:, columnas_grupo], target[:, columnas_grupo])
+            if arquitectura == 1
+                output_aux, target_aux, lose_aux = entrenar_RRNNAA(input[:, columnas_restantes], target[:, columnas_restantes], input[:, columnas_grupo], target[:, columnas_grupo])
+            elseif arquitectura == 2
+                output_aux, target_aux, lose_aux = entrenar_tree(input[:, columnas_restantes], target[:, columnas_restantes], input[:, columnas_grupo], target[:, columnas_grupo])
+            elseif arquitectura == 3
+                output_aux, target_aux, lose_aux = entrenar_svm(input[:, columnas_restantes], target[:, columnas_restantes], input[:, columnas_grupo], target[:, columnas_grupo])
+            elseif arquitectura == 4
+                output_aux, target_aux, lose_aux = entrenar_KNe(input[:, columnas_restantes], target[:, columnas_restantes], input[:, columnas_grupo], target[:, columnas_grupo])
+            else
+                println("Estado no válido")
+            end
             lose=lose+lose_aux
             push!(error_data, accuracy(output_aux,target_aux))
             output_data=vcat(output_data,output_aux)
@@ -786,15 +800,14 @@ function ejecutar_crosscalidation(input,target)
         title="Cantidad de datos por clase")
     display(p)
 
-    println(error_data)
+    #println(error_data)
 
     #error_data=calcular_mse_por_clase(output_data, target_data)
     println(size(output_data))
-    #error_data = replace(error_data, NaN => 0.0)
-    gr();
-    class_labels = ["Clase $i" for i in 1:output_length]
-    p = boxplot( error_data, xlabel="Class", ylabel="Mean Squared Error", title="Boxplot of Mean Squared Error per Class", size=(1920, 1080)) # Tamaño ajustado    
-    display(p)
+    error_data = replace(error_data, NaN => 0.0)
+    #gr();
+    #p = boxplot( error_data, xlabel="Class", ylabel="Mean Squared Error", title="Boxplot of Mean Squared Error per Class", size=(1920, 1080)) # Tamaño ajustado    
+    #display(p)
 
     # Calcula la desviación típica
     suma_cuadrados = sum((output_data .- target_data).^2)
@@ -805,8 +818,11 @@ function ejecutar_crosscalidation(input,target)
     println("Desviacion tipica: ",desviacion_tipica)
     println("Error: ",(lose/veces))
     println()
+    return error_data
     
 end
+
+error_data=nothing
 
 #procesar_archivos("carpeta_input");
 
@@ -818,4 +834,14 @@ archivo = open("target.txt", "r")
 target = readdlm(archivo)
 close(archivo)
 
-ejecutar_crosscalidation(input,target)
+error_data=ejecutar_crosscalidation(input,target,1)
+error_data=hcat(error_data,ejecutar_crosscalidation(input,target,2))
+error_data=hcat(error_data,ejecutar_crosscalidation(input,target,3))
+error_data=hcat(error_data,ejecutar_crosscalidation(input,target,4))
+gr();
+println(size(error_data))
+error_data = replace(error_data, NaN => 0.0)
+error_data = convert(Matrix{Float64}, error_data)
+arquitectura_labels = ["arquitectura $i" for i in 1:4]
+p = boxplot(error_data, xlabel="Class", ylabel="Mean Accuracy", title="Boxplot of Accuracy per model", size=(1920, 1080)) # Tamaño ajustado    
+display(p)
